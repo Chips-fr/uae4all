@@ -6,7 +6,6 @@
   * Copyright 1996 Bernd Schmidt
   */
 
-#include <math.h>
 #include "sysconfig.h"
 #include "sysdeps.h"
 #include "config.h"
@@ -25,11 +24,6 @@
 #include "keybuf.h"
 #include "disk.h"
 #include "savestate.h"
-#include "joystick.h"
-
-#ifdef HOME_DIR
-#include "homedir.h"
-#endif
 
 #include <SDL.h>
 
@@ -46,7 +40,7 @@ unsigned long long uae4all_prof_executed[UAE4ALL_PROFILER_MAX];
 #ifdef DINGOO
 #define VIDEO_FLAGS_INIT SDL_SWSURFACE
 #else
-#define VIDEO_FLAGS_INIT SDL_HWSURFACE
+#define VIDEO_FLAGS_INIT SDL_SWSURFACE|SDL_FULLSCREEN
 #endif
 #endif
 
@@ -65,8 +59,12 @@ static char _show_message_str[40]={
 
 int show_message=0;
 char *show_message_str=(char *)&_show_message_str[0];
-
+#ifndef RASPBERRY
 extern SDL_Surface *prSDLScreen;
+#else
+SDL_Surface *prSDLScreen;
+#endif
+
 extern struct uae_prefs changed_prefs;
 extern struct uae_prefs currprefs;
 extern SDL_Joystick *uae4all_joy0, *uae4all_joy1;
@@ -76,12 +74,12 @@ extern int uae4all_keystate[];
 
 int emulated_mouse_speed=4;
 int emulating=0;
-char uae4all_image_file[128];
-char uae4all_image_file2[128];
+char uae4all_image_file[128] = { 0, };
+char uae4all_image_file2[128] = { 0, };
 
 int drawfinished=0;
 
-extern int mainMenu_throttle, mainMenu_frameskip, mainMenu_sound, mainMenu_case, mainMenu_autosave, mainMenu_vpos, mainMenu_usejoy;
+extern int mainMenu_throttle, mainMenu_frameskip, mainMenu_sound, mainMenu_case, mainMenu_autosave, mainMenu_vpos;
 
 int emulated_left=0;
 int emulated_right=0;
@@ -92,108 +90,6 @@ int emulated_button2=0;
 int emulated_mouse=0;
 int emulated_mouse_button1=0;
 int emulated_mouse_button2=0;
-
-void loadConfig()
-{
-#if defined(HOME_DIR)
-	FILE *f;
-	char *config = (char *)malloc(strlen(config_dir) + strlen("/uae4all.cfg") + 1);
-	extern char last_directory[PATH_MAX];
-
-	if(config == NULL)
-		return;
-
-	sprintf(config, "%s/uae4all.cfg", config_dir);
-
-	f = fopen(config, "r");
-
-	if(f == NULL)
-	{
-		printf("Failed to open config file: \"%s\" for reading.\n", config);
-		free(config);
-		return;
-	}
-
-	char line[PATH_MAX + 17];
-
-	while(fgets(line, sizeof(line), f))
-	{
-		char *arg = strchr(line, ' ');
-
-		if(!arg)
-		{
-			continue;
-		}
-		*arg = '\0';
-		arg++;
-
-		if(!strcmp(line, "THROTTLE"))
-			sscanf(arg, "%d", &mainMenu_throttle);
-		else if(!strcmp(line, "FRAMESKIP"))
-			sscanf(arg, "%d", &mainMenu_frameskip);
-		else if(!strcmp(line, "SCREEN_POS"))
-			sscanf(arg, "%d", &mainMenu_vpos);
-		else if(!strcmp(line, "SOUND"))
-			sscanf(arg, "%d", &mainMenu_sound);
-		else if(!strcmp(line, "SAVE_DISKS"))
-			sscanf(arg, "%d", &mainMenu_autosave);
-		else if(!strcmp(line, "USE_JOY"))
-			sscanf(arg, "%d", &mainMenu_usejoy);
-		else if(!strcmp(line, "LAST_DIR"))
-		{
-			int len = strlen(arg);
-
-			if(len == 0 || len > sizeof(last_directory) - 1)
-			{
-				continue;
-			}
-
-			if(arg[len-1] == '\n')
-			{
-				arg[len-1] = '\0';
-			}
-
-			strcpy(last_directory, arg);
-		}
-	}
-
-	fclose(f);
-	free(config);
-#endif
-}
-
-void storeConfig()
-{
-#if defined(HOME_DIR)
-	FILE *f;
-	char *config = (char *)malloc(strlen(config_dir) + strlen("/uae4all.cfg") + 1);
-	extern char last_directory[PATH_MAX];
-
-	if(config == NULL)
-		return;
-
-	sprintf(config, "%s/uae4all.cfg", config_dir);
-
-	f = fopen(config, "w");
-
-	if(f == NULL)
-	{
-		printf("Failed to open config file: \"%s\" for writing.\n", config);
-		free(config);
-		return;
-	}
-
-	fprintf(f, "THROTTLE %d\nFRAMESKIP %d\nSCREEN_POS %d\nSOUND %d\nSAVE_DISKS %d\nUSE_JOY %d\n", mainMenu_throttle, mainMenu_frameskip, mainMenu_vpos, mainMenu_sound, mainMenu_autosave, mainMenu_usejoy);
-
-	if(last_directory[0])
-	{
-		fprintf(f, "LAST_DIR %s\n", last_directory);
-	}
-
-	fclose(f);
-	free(config);
-#endif
-}
 
 static void getChanges(void)
 {
@@ -214,25 +110,30 @@ static void getChanges(void)
 int gui_init (void)
 {
 //Se ejecuta justo despues del MAIN
+//#ifndef RASPBERRY
+#if 1
+
+    const SDL_VideoInfo* videoInfo = SDL_GetVideoInfo ();
+    printf("Res: %d x %d %d bpp\n",videoInfo->current_w, videoInfo->current_h, videoInfo->vfmt->BitsPerPixel);
+
     if (prSDLScreen==NULL)
-	prSDLScreen=SDL_SetVideoMode(320,240,16,VIDEO_FLAGS);
+	//prSDLScreen=SDL_SetVideoMode(640,480,16,SDL_SWSURFACE);
+        prSDLScreen=SDL_SetVideoMode(videoInfo->current_w,videoInfo->current_h,16,VIDEO_FLAGS);
+
     SDL_ShowCursor(SDL_DISABLE);
+#endif
     SDL_JoystickEventState(SDL_ENABLE);
     SDL_JoystickOpen(0);
+//#ifndef RASPBERRY
+#if 1
     if (prSDLScreen!=NULL)
+#endif
     {
 	emulating=0;
-#if !defined(DEBUG_UAE4ALL) && !defined(PROFILER_UAE4ALL) && !defined(AUTO_RUN) && !defined(AUTO_FRAMERATE)
-	uae4all_image_file[0]=0;
-	uae4all_image_file2[0]=0;
-#else
-	strcpy(uae4all_image_file,"prueba.adz");
-	strcpy(uae4all_image_file2,"prueba2.adz");
-#endif
 	vkbd_init();
 	init_text(1);
-	loadConfig();
-	run_mainMenu();
+	if (strcmp(uae4all_image_file, "df0.adf")== 0)
+		run_mainMenu();
 	quit_text();
 	uae4all_pause_music();
 	emulating=1;
@@ -409,10 +310,10 @@ static void goMenu(void)
    menu_raise();
    exitmode=run_mainMenu();
    notice_screen_contents_lost();
-   resume_sound();
+   #ifndef RASPBERRY
    if ((!(strcmp(prefs_df[0],uae4all_image_file))) || ((!(strcmp(prefs_df[1],uae4all_image_file2)))))
 	   menu_unraise();
-   quit_text();
+   #endif
 //   vkbd_init();
 #ifdef DREAMCAST
    SDL_DC_EmulateKeyboard(SDL_FALSE);
@@ -450,6 +351,35 @@ static void goMenu(void)
     	    }
 #endif
     }
+    if (exitmode==3)
+    {
+    	    extern char *savestate_filename;
+#ifndef NO_SAVE_MENU
+    	    extern int saveMenu_n_savestate;
+#endif
+	    changed_df[1][0]=0;
+	    if (strcmp(changed_df[0],uae4all_image_file))
+	    { 
+            	strcpy(changed_df[0],uae4all_image_file);
+	    	real_changed_df[0]=1;
+	    }
+    	    strcpy(savestate_filename,uae4all_image_file);
+#ifndef NO_SAVE_MENU
+    	    switch(saveMenu_n_savestate)
+    	    {
+	   	 case 1:
+    			strcat(savestate_filename,"-1.asf");
+	    	case 2:
+    			strcat(savestate_filename,"-2.asf");
+	    	case 3:
+    			strcat(savestate_filename,"-3.asf");
+	    	default: 
+    	  	 	strcat(savestate_filename,".asf");
+    	    }
+#endif
+	    uae4all_image_file2[0]=0;
+	    disk_eject(1);
+    }
     if (exitmode==2)
     {
 	    if (autosave!=mainMenu_autosave)
@@ -458,9 +388,12 @@ static void goMenu(void)
 	   	prefs_df[1][0]=0;
 	    }
 	    black_screen_now();
+		audio_clear();
 	    show_mhz();
 	    uae_reset ();
     }
+	quit_text();
+	resume_sound();
     check_all_prefs();
     gui_purge_events();
     notice_screen_contents_lost();
@@ -532,11 +465,10 @@ static int in_goMenu=0;
 void gui_handle_events (void)
 {
 #ifndef DREAMCAST
-	int i;
 	Uint8 *keystate = SDL_GetKeyState(NULL);
 
 #ifdef EMULATED_JOYSTICK
-#if !defined(GCW0)
+#ifndef RASPBERRY
 	if (keystate[SDLK_ESCAPE])
 	{
 		if (keystate[SDLK_LCTRL])
@@ -581,7 +513,6 @@ void gui_handle_events (void)
 		}
 	}
 	else
-#endif
 	if (emulated_mouse)
 	{
 		if (keystate[SDLK_LEFT])
@@ -606,51 +537,9 @@ void gui_handle_events (void)
 			lastmy += emulated_mouse_speed;
 	    		newmousecounters = 1;
 		}
-
-#ifndef DREAMCAST
-		for(i = 0; i < SDL_NumJoysticks(); i++)
-		{
-			SDL_Joystick *joy = i == 0 ? uae4all_joy0 : uae4all_joy1;
-			int joyx = SDL_JoystickGetAxis(joy, 0);	// left-right
-			int joyy = SDL_JoystickGetAxis(joy, 1);	// up-down
-			struct joy_range *dzone = i == 0 ? &dzone0 : &dzone1;
-
-			if(!mainMenu_usejoy)
-			{
-				break;
-			}
-
-			if(i > 1)
-			{
-				break;
-			}
-
-			if (joyx < dzone->minx)
-			{
-				lastmx -= emulated_mouse_speed;
-				newmousecounters = 1;
-			}
-			else
-			if (joyx > dzone->maxx)
-			{
-				lastmx += emulated_mouse_speed;
-				newmousecounters = 1;
-			}
-			if (joyy < dzone->miny)
-			{
-				lastmy -= emulated_mouse_speed;
-				newmousecounters = 1;
-			}
-			else
-			if (joyy > dzone->maxy)
-			{
-				lastmy += emulated_mouse_speed;
-				newmousecounters = 1;
-			}
-		}
-#endif
 	}
 	else
+#endif
 	{
 		emulated_left=keystate[SDLK_LEFT];
 		emulated_right=keystate[SDLK_RIGHT];
@@ -668,18 +557,18 @@ void gui_handle_events (void)
 	else
 		leftSuperThrottle();
 #endif
-#if !defined(DINGOO) && !defined(GCW0) && !defined(DREAMCAST)
+#if !defined(DINGOO) && !defined(DREAMCAST) && !defined(RASPBERRY)
 	if ( keystate[SDLK_F12] )
 		SDL_WM_ToggleFullScreen(prSDLScreen);
 	else
 #endif
-	if (( keystate[SDLK_F11] )
+// Use some joy button to go back to menu
+	//if (( keystate[SDLK_F11] )
+	extern int joy1button;
+	if (( keystate[SDLK_F12] ) || (joy1button & 0xFFF0)
+// Use some joy button to go back to menu
 #ifdef EMULATED_JOYSTICK
-#if defined(GCW0)
-			||(keystate[SDLK_ESCAPE])
-#else
 			||((keystate[SDLK_RETURN])&&(keystate[SDLK_ESCAPE]))
-#endif
 #endif
 	   )
 #else
@@ -693,6 +582,13 @@ void gui_handle_events (void)
 			in_goMenu=SDL_GetTicks();
 	} else {
 		if (in_goMenu) {
+
+#ifdef RASPBERRY
+			extern void graphics_dispmanshutdown(void);
+			extern void graphics_subinit (void);
+			graphics_dispmanshutdown();
+#endif
+			
 			if (SDL_GetTicks()-in_goMenu>333) {
 #ifdef DREAMCAST
 				if (SDL_JoystickGetAxis (uae4all_joy0, 3) && !savestate_state)
@@ -705,10 +601,13 @@ void gui_handle_events (void)
 			} else {
 				goMenu();
 			}
+#ifdef RASPBERRY
+			graphics_subinit ();
+#endif
 			in_goMenu=0;
 		}
 	}
-#ifdef EMULATED_JOYSTICK
+#if defined(EMULATED_JOYSTICK) && !defined(RASPBERRY)
 	if (keystate[SDLK_RETURN])
 	{
 		if (goingSuperThrottle<3)
@@ -732,10 +631,8 @@ void gui_handle_events (void)
 			savestate_state = STATE_DOSAVE;
 		}
 		else
-		if (!vkbd_mode && !goingVkbd)
-		{
+		if (!vkbd_mode)
 			goingEmouse=1;
-		}
 	}
 	else if (goingEmouse)
 	{
@@ -760,10 +657,8 @@ void gui_handle_events (void)
     				gui_set_message("Failed: Savestate not found", 100);
 		}
 		else
-		if (!emulated_mouse && !goingEmouse)
-		{
+		if (!emulated_mouse)
 			goingVkbd=1;
-		}
 		else
 		{
 			char str[40];
@@ -900,7 +795,7 @@ void gui_update_gfx (void)
 //	dbg("GUI: gui_update_gfx");
 }
 
-void gui_set_message(const char *msg, int t)
+void gui_set_message(char *msg, int t)
 {
 	show_message=t;
 	strncpy(show_message_str, msg, 36);
@@ -908,14 +803,17 @@ void gui_set_message(const char *msg, int t)
 
 void gui_show_window_bar(int per, int max, int case_title)
 {
-	const char *title;
+	char *title;
 	if (case_title)
 		title="  Restore State";
 	else
 		title="  Save State";
+//#ifndef RASPBERRY
+#if 1
 	_text_draw_window_bar(prSDLScreen,80,64,172,48,per,max,title);
 #if defined(DOUBLEBUFFER) || defined(DINGOO)
 	SDL_Flip(prSDLScreen);
+#endif
 #endif
 }
 

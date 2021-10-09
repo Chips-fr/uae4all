@@ -61,6 +61,8 @@
 #define GFXVIDINFO_PIXBYTES 2
 #define GFXVIDINFO_WIDTH 320
 #define GFXVIDINFO_HEIGHT 240
+//#define GFXVIDINFO_WIDTH 640
+//#define GFXVIDINFO_HEIGHT 480
 #define MAXBLOCKLINES 240
 #define VISIBLE_LEFT_BORDER 72
 #define VISIBLE_RIGHT_BORDER 392
@@ -113,7 +115,7 @@ struct color_entry colors_for_drawing;
 /* The size of these arrays is pretty arbitrary; it was chosen to be "more
    than enough".  The coordinates used for indexing into these arrays are
    almost, but not quite, Amiga coordinates (there's a constant offset).  */
-static union {
+union {
     /* Let's try to align this thing. */
     double uupzuq;
     long int cruxmedo;
@@ -171,7 +173,9 @@ static int sbasecol[2];
 
 int inhibit_frame;
 
-int framecnt = 0;
+int framecnt = 0 , fsframecnt = 0;
+
+
 #ifndef USE_ALL_LINES
 int framecnt_hack = 0;
 #else
@@ -185,11 +189,11 @@ static int frame_redraw_necessary;
 
 #if defined(NO_THREADS) && defined(DREAMCAST)
 // SOLO PARA DREAMCAST PORQUE TIENE UN SOUNDBUFFER DE 960
-#define UMBRAL 21
+#define FRAME_DURATION 21
 #else
-#define UMBRAL 20
+#define FRAME_DURATION 20
 #endif
-#define PARTIDA (UMBRAL/2)
+#define PARTIDA (FRAME_DURATION/2)
 
 extern Uint32 uae4all_numframes;
 
@@ -198,7 +202,7 @@ extern Uint32 uae4all_frameskipped;
 extern double uae4all_framerate;
 #endif
 
-static Uint32 proximo_frameskip;
+Uint32 proximo_frameskip;
 extern int *tabla_ajuste;
 
 void reset_frameskip()
@@ -206,10 +210,15 @@ void reset_frameskip()
 	proximo_frameskip=SDL_GetTicks();
 }
 
+
+int old_nb_frame_skipped = 0;
+int old_nb_frame_skipped2 = 0;
+extern uae_sem_t vsync_wait_sem;
+
+
 static __inline__ void count_frame (void)
 {
     uae4all_numframes++;
-
 #ifdef AUTO_PROFILER
     if (uae4all_numframes==AUTO_PROFILER)
     {
@@ -281,9 +290,9 @@ static __inline__ void count_frame (void)
 #endif
     if (prefs_gfx_framerate>=0)
     {
-    	framecnt++;
-    	if (framecnt > prefs_gfx_framerate)
-		framecnt = 0;
+    	fsframecnt++;
+    	if (fsframecnt > prefs_gfx_framerate)
+		fsframecnt = 0;
 #ifdef DEBUG_FRAMERATE
 	else
 		uae4all_frameskipped++;
@@ -291,10 +300,10 @@ static __inline__ void count_frame (void)
     }
     else
     {
-	static int cuantos=0;
+	static int nb_frame_skipped=0;
 
-	Uint32 ahora=SDL_GetTicks();
-	proximo_frameskip+=UMBRAL;
+	Uint32 ahora=SDL_GetTicks(); // current time
+	//proximo_frameskip+=FRAME_DURATION; // expected time of next frame
 
 #ifdef NO_THREADS
 	if (!produce_sound)
@@ -302,36 +311,42 @@ static __inline__ void count_frame (void)
 	else
 		proximo_frameskip+=(tabla_ajuste[uae4all_numframes%9]);
 #endif
-	if ((ahora-PARTIDA)>proximo_frameskip)
-	{	
-		cuantos++;
-		if (cuantos>5)
+
+	// check feedback from vsync callback if we need to do frameskip
+	// or check if audio is getting underrun (but it should be better to test it before semaphore consuming !).
+	extern unsigned int wrcnt,cnt;
+	extern int need_frameskip;
+	if  ((need_frameskip > 0) || ((wrcnt - cnt) < 1))
+	//if  (need_frameskip)
+	{
+        // So we do frameskip
+		nb_frame_skipped++;
+		
+		//printf(" frameskip %i\n", need_frameskip);
+		if (need_frameskip > 0)
+			need_frameskip -- ; // we reset the state
+		proximo_frameskip = proximo_frameskip - 20; // we remove the missed frame from the timing
+		if (nb_frame_skipped>5)
 		{
-			proximo_frameskip=ahora+2;
-			framecnt=0;
-			cuantos=0;
+			//proximo_frameskip=ahora+2;
+			fsframecnt=0;
+			old_nb_frame_skipped=nb_frame_skipped-1;
+			nb_frame_skipped=0;
 		}
 		else
 		{
-			framecnt=1;
-#ifdef DEBUG_FRAMERATE
-			uae4all_frameskipped++;
-#endif
+			fsframecnt=1;
+			proximo_frameskip+=FRAME_DURATION;  // We generate a fake Vsync by increasing frame timing
 		}
+
+
 	}
 	else
 	{
-		if ((ahora+PARTIDA)<proximo_frameskip)
-		{
-#ifdef DREAMCAST
-//			SDL_Delay(proximo_frameskip-ahora-PARTIDA+1);
-#else
-			SDL_Delay(proximo_frameskip-ahora);
-#endif
-			proximo_frameskip=SDL_GetTicks();
-		}
-		framecnt=0;
-		cuantos=0;
+		fsframecnt=0;
+		old_nb_frame_skipped2=old_nb_frame_skipped;
+		old_nb_frame_skipped=nb_frame_skipped;
+		nb_frame_skipped=0;
 	}
     }
 }
@@ -739,7 +754,8 @@ static void draw_sprites_normal_sp_lo_nat(struct sprite_entry *_GCCRES_ e)
 
 static void draw_sprites_normal_dp_lo_nat(struct sprite_entry *_GCCRES_ e)
 {
-    int *shift_lookup = (bpldualpfpri ? dblpf_ms2 : dblpf_ms1);
+    int *shift_lookup = 
+(bpldualpfpri ? dblpf_ms2 : dblpf_ms1);
     uae_u16 *buf = spixels + e->first_pixel;
     uae_u8 *stbuf = spixstate.bytes + e->first_pixel;
     int pos, window_pos;
@@ -1736,6 +1752,10 @@ static __inline__ void do_flush_screen (int start, int stop)
 {
     if (first_block_line != -2) 
 	flush_block (first_block_line, last_block_line);
+    
+#if !defined(DREAMCAST) && !defined(DINGOO)
+    unlockscr ();
+#endif
 }
 #else
 #define do_flush_line(LNO)
@@ -1928,7 +1948,7 @@ static int td_pos = (TD_RIGHT|TD_BOTTOM);
 
 #define TD_TOTAL_HEIGHT (TD_PADY * 2 + TD_NUM_HEIGHT)
 
-static const char *numbers = { /* ugly */
+static char *numbers = { /* ugly */
 "------ ------ ------ ------ ------ ------ ------ ------ ------ ------ "
 "-xxxxx ---xx- -xxxxx -xxxxx -x---x -xxxxx -xxxxx -xxxxx -xxxxx -xxxxx "
 "-x---x ----x- -----x -----x -x---x -x---- -x---- -----x -x---x -x---x "
@@ -1938,11 +1958,9 @@ static const char *numbers = { /* ugly */
 "------ ------ ------ ------ ------ ------ ------ ------ ------ ------ "
 };
 
-#if !defined(DOUBLEBUFFER) && !defined(STATUS_ALWAYS)
 int back_drive_track0=-1,back_drive_motor0=-1;
 static int back_drive_track1=-1,back_drive_motor1=-1;
 static int back_powerled=-1;
-#endif
 
 static __inline__ void putpixel (int x, xcolnr c8)
 {
@@ -1988,6 +2006,13 @@ static _INLINE_ void draw_status_line (int line)
 	    off_rgb = 0x040;
 	} else {
 	    track = -1;
+	    //extern uae_sem_t callback_done_sem;
+	    //extern int in_callback;
+	    //extern unsigned n_callback_sndbuff, n_render_sndbuff,wrcnt,cnt;
+	    //track = (wrcnt % 4) - (cnt % 4);
+	    //if (track < 0)  track+=4;            
+	    //track = old_nb_frame_skipped2;
+	    //track = uae_sem_getvalue(&vsync_wait_sem);
 	    on = gui_data.powerled;
 	    on_rgb = 0xf00;
 	    off_rgb = 0x400;
@@ -2026,6 +2051,13 @@ static _INLINE_ void finish_drawing_frame (void)
 {
     int i;
 
+#if !defined(DREAMCAST) && !defined(DINGOO)
+    if (! lockscr ()) {
+	notice_screen_contents_lost ();
+	return;
+    }
+#endif
+
     for (i = 0; i < max_ypos_thisframe; i++) {
 	int where,i1;
 	int line = i + thisframe_y_adjust_real;
@@ -2045,25 +2077,21 @@ static _INLINE_ void finish_drawing_frame (void)
 	    continue;
 	pfield_draw_line (line, where, amiga2aspect_line_map[i1 + 1]);
     }
+// DEACTIVATE FOR DEBUG
+#if 1
 #ifdef USE_RASTER_DRAW
     if (   (frame_redraw_necessary) ||
 #else
     if (
 #endif
-#if !defined(DOUBLEBUFFER) && !defined(STATUS_ALWAYS)
 	   (back_drive_track0!=gui_data.drive_track[0])
 	|| (back_drive_motor0!=gui_data.drive_motor[0])
 #if NUM_DRIVES > 1
 	|| (back_drive_track1!=gui_data.drive_track[1])
 	|| (back_drive_motor1!=gui_data.drive_motor[1])
 #endif
-	|| (back_powerled!=gui_data.powerled)
-#else
-	1
-#endif
-	)
+	|| (back_powerled!=gui_data.powerled)	)
     {
-#if !defined(DOUBLEBUFFER) && !defined(STATUS_ALWAYS)
 	back_drive_track0=gui_data.drive_track[0];
 	back_drive_motor0=gui_data.drive_motor[0];
 #if NUM_DRIVES > 1
@@ -2071,13 +2099,31 @@ static _INLINE_ void finish_drawing_frame (void)
 	back_drive_motor1=gui_data.drive_motor[1];
 #endif
 	back_powerled=gui_data.powerled;
-#endif
  	for (i = 0; i < TD_TOTAL_HEIGHT; i++) {
 		int line = GFXVIDINFO_HEIGHT - TD_TOTAL_HEIGHT + i;
 		draw_status_line (line);
 		do_flush_line (line);
     	}
     }
+#else
+	back_drive_track0=gui_data.drive_track[0];
+	back_drive_motor0=gui_data.drive_motor[0];
+#if NUM_DRIVES > 1
+	back_drive_track1=gui_data.drive_track[1];
+	back_drive_motor1=gui_data.drive_motor[1];
+#endif
+	back_powerled=gui_data.powerled;
+ 	for (i = 0; i < TD_TOTAL_HEIGHT; i++) {
+		int line = GFXVIDINFO_HEIGHT - TD_TOTAL_HEIGHT + i;
+		draw_status_line (line);
+		do_flush_line (line);
+    	}
+
+
+#endif
+
+
+
 #ifdef USE_RASTER_DRAW
     drawfinished=1;
     do_flush_screen (first_drawn_line, last_drawn_line);
@@ -2086,18 +2132,30 @@ static _INLINE_ void finish_drawing_frame (void)
 #endif
 }
 
-
+int wait_for_vsync = 1;
 void vsync_handle_redraw (int long_frame, int lof_changed)
 {
     last_redraw_point++;
+
+    // To improve
+    if (wait_for_vsync == 1) {
+	    uae_sem_wait (&vsync_wait_sem);
+    }
+
+    count_frame ();
+    wait_for_vsync = 0;
+
     if (lof_changed || ! interlace_seen || last_redraw_point >= 2 || long_frame) {
 	last_redraw_point = 0;
 	interlace_seen = 0;
 
 	if (framecnt == 0 || framecnt_hack) {
+	    wait_for_vsync = 1;
+
 	    framecnt = 0;
 	    finish_drawing_frame ();
 	}
+	
 #ifndef USE_ALL_LINES
 	framecnt_hack = 0;
 #endif
@@ -2131,12 +2189,15 @@ void vsync_handle_redraw (int long_frame, int lof_changed)
 	    set_inhibit_frame (IHF_QUIT_PROGRAM);
 	    set_special (SPCFLAG_BRK);
 #ifdef USE_FAME_CORE
+#ifdef USE_CYCLONE_CORE
+            m68k_release_timeslice();
+#else
             m68k_stop_emulating();
+#endif
 #endif
 	    return;
 	}
-
-	count_frame ();
+	framecnt = fsframecnt;
 
 	if (inhibit_frame != 0)
 	    framecnt = 1;
@@ -2203,12 +2264,6 @@ void reset_drawing (void)
     uae4all_memclr(&spixstate, sizeof spixstate);
 
     init_drawing_frame ();
-}
-
-void reset_screen_pointers (void)
-{
-	xlinebuffer = gfx_mem;
-	init_row_map();
 }
 
 void drawing_init ()

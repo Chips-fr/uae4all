@@ -4,18 +4,11 @@
   * SDL interface
   *
   * Copyright 2001 Bernd Lachner (EMail: dev@lachner-net.de)
-  *
-  * Partialy based on the UAE X interface (xwin.c)
-  *
-  * Copyright 1995, 1996 Bernd Schmidt
-  * Copyright 1996 Ed Hanway, Andre Beck, Samuel Devulder, Bruno Coste
-  * Copyright 1998 Marcus Sundberg
-  * DGA support by Kai Kollmorgen
-  * X11/DGA merge, hotkeys and grabmouse by Marcus Sundberg
+  *  Raspberry Pi dispmanx by Chips
+  * 
   */
 
-void carga(void);
-void guarda(void);
+
 
 #include "sysconfig.h"
 #include "sysdeps.h"
@@ -33,7 +26,6 @@ void guarda(void);
 #include "xwin.h"
 #include "custom.h"
 #include "drawing.h"
-#include "m68k/m68k_intrf.h"
 #include "keyboard.h"
 #include "keybuf.h"
 #include "gui.h"
@@ -42,98 +34,79 @@ void guarda(void);
 #include "menu/menu.h"
 #include "vkbd/vkbd.h"
 
-#ifdef DREAMCAST
-#include <SDL_dreamcast.h>
-extern int __sdl_dc_emulate_mouse;
-#endif
-
 #include "debug_uae4all.h"
 
-#include "vkbd.h"
+#include "thread.h"
 
+#include "vkbd.h"
+#include "bcm_host.h"
 extern int drawfinished;
+
+extern int mainMenu_screenformat;
 
 int prefs_gfx_framerate, changed_gfx_framerate;
 
-uae_u16 *prSDLScreenPixels;
+uae_sem_t vsync_wait_sem;
+
+extern Uint32 proximo_frameskip;
 
 char *gfx_mem=NULL;
 unsigned gfx_rowbytes=0;
 
 Uint32 uae4all_numframes=0;
 
-#ifdef DEBUG_FRAMERATE
-
-Uint32 uae4all_frameskipped=0;
-double uae4all_framerate=0.0;
-
-void uae4all_update_time(void)
-{
-	uae4all_numframes=0;
-	uae4all_frameskipped=0;
-	uae4all_framerate=0.0;
-}
-
-void uae4all_show_time(void)
-{
-	int i;
-#if !defined(AUTO_FRAMERATE_SOUND) && !defined(NO_SOUND)
-	extern double media_ratio;
-	extern unsigned sound_cuantos[8];
-	extern unsigned sound_ajustes;
-	extern unsigned sound_alcanza_callback;
-	extern unsigned sound_alcanza_render;
-#endif
-	double p=(((double)uae4all_frameskipped)*((double)100.0))/((double)uae4all_numframes);
-	double p0=((100.0-p)*uae4all_framerate)/100.0;
-	printf("---- frameskipping = %.4f%%\n",p);
-	printf("---- framerate = %.4f/%.4f\n",p0,uae4all_framerate);
-#if !defined(AUTO_FRAMERATE_SOUND) && !defined(NO_SOUND)
-	printf("---- audio ratio media = %.2f msec\n",media_ratio/1000.0);
-	for(i=0;i<8;i++)
-		printf("distancia %i = %i -> %.2f%%\n",i,sound_cuantos[i],(((double)sound_cuantos[i])*100.0)/((double)sound_ajustes));
-	printf("CALLBACK ALCANZA %i VECES A RENDER\n",sound_alcanza_callback);
-	printf("RENDER ALCANZA %i VECES A CALLBACK\n",sound_alcanza_render);
-#endif
-}
-#endif
-
-
-#ifdef DREAMCAST
-#define VIDEO_FLAGS_INIT SDL_HWSURFACE|SDL_FULLSCREEN
-#else
-#ifdef DINGOO
-#define VIDEO_FLAGS_INIT SDL_SWSURFACE
-#else
-#define VIDEO_FLAGS_INIT SDL_HWSURFACE|SDL_FULLSCREEN
-#endif
-#endif
-
-#ifdef DOUBLEBUFFER
-#define VIDEO_FLAGS VIDEO_FLAGS_INIT | SDL_DOUBLEBUF
-#else
-#define VIDEO_FLAGS VIDEO_FLAGS_INIT
-#endif
-
-/* Uncomment for debugging output */
-/* #define DEBUG */
 
 static __inline__ RETSIGTYPE sigbrkhandler (int foo) {}
 
-/* SDL variable for output surface */
-SDL_Surface *prSDLScreen = NULL;
-/* Possible screen depth (0 terminated) */
+
+DISPMANX_DISPLAY_HANDLE_T   dispmanxdisplay;
+DISPMANX_MODEINFO_T         dispmanxdinfo;
+DISPMANX_RESOURCE_HANDLE_T  dispmanxresource_amigafb_1;
+DISPMANX_RESOURCE_HANDLE_T  dispmanxresource_amigafb_2;
+DISPMANX_ELEMENT_HANDLE_T   dispmanxelement;
+DISPMANX_UPDATE_HANDLE_T    dispmanxupdate;
+VC_RECT_T       src_rect;
+VC_RECT_T       dst_rect;
+VC_RECT_T       blit_rect;
+
+DISPMANX_RESOURCE_HANDLE_T  dispmanxresource_menu;
+DISPMANX_RESOURCE_HANDLE_T  dispmanxresource_menu2;
+DISPMANX_ELEMENT_HANDLE_T   dispmanxelement_menu;
+
+
+VC_RECT_T       src_rect_menu;
+VC_RECT_T       dst_rect_menu;
+VC_RECT_T       blit_rect_menu;
+
+unsigned char current_resource_amigafb = 0;
 
 static int red_bits, green_bits, blue_bits;
 static int red_shift, green_shift, blue_shift;
 
 static int current_width, current_height;
-static SDL_Color arSDLColors[256];
-static int ncolors = 0;
 extern int emulated_mouse, emulated_mouse_button1, emulated_mouse_button2;
 
 /* Keyboard and mouse */
 int uae4all_keystate[256];
+
+
+int vsync_frequency = 0;
+int old_time = 0;
+int need_frameskip = 0;
+
+void vsync_callback(unsigned int a, void* b)
+{
+	proximo_frameskip=SDL_GetTicks();
+
+
+	vsync_frequency = proximo_frameskip - old_time;
+	old_time = proximo_frameskip;
+	need_frameskip =  ( vsync_frequency > 31 ) ? (need_frameskip+1) : need_frameskip;
+	//printf("d: %i", vsync_frequency     );
+
+	uae_sem_post (&vsync_wait_sem);
+}
+
 
 
 #ifdef USE_RASTER_DRAW
@@ -146,24 +119,44 @@ void flush_screen (void)
 #ifdef DEBUG_GFX
     dbgf("Function: flush_block %d %d\n", ystart, ystop);
 #endif
-#ifndef DINGOO
-#ifndef DREAMCAST
-    if (SDL_MUSTLOCK(prSDLScreen))
-    	SDL_UnlockSurface (prSDLScreen);
-#endif
-#ifndef DOUBLEBUFFER
-#ifdef USE_RASTER_DRAW
-    SDL_UpdateRect(prSDLScreen, 0, ystart, current_width, ystop-ystart+1);
-#else
-    SDL_UpdateRect(prSDLScreen, 0, 0, 320, 240);
-#endif
-#endif
-#endif
-#ifdef USE_RASTER_DRAW
-    if (drawfinished)
-    {
-	drawfinished=0;
-#endif
+	if (current_resource_amigafb == 1)
+	{
+		current_resource_amigafb = 0;
+		vc_dispmanx_resource_write_data(  dispmanxresource_amigafb_1,
+	                                    VC_IMAGE_RGB565,
+	                                    current_width * 2,
+	                                    gfx_mem,
+	                                    &blit_rect );
+		dispmanxupdate = vc_dispmanx_update_start( 10 );
+		vc_dispmanx_element_change_source(dispmanxupdate,dispmanxelement,dispmanxresource_amigafb_1);
+
+		vc_dispmanx_update_submit(dispmanxupdate,vsync_callback,NULL);
+
+	}
+	else
+	{
+		current_resource_amigafb = 1;
+		vc_dispmanx_resource_write_data(  dispmanxresource_amigafb_2,
+	                                    VC_IMAGE_RGB565,
+	                                    current_width * 2,
+	                                    gfx_mem,
+	                                    &blit_rect );
+		dispmanxupdate = vc_dispmanx_update_start( 10 );
+		vc_dispmanx_element_change_source(dispmanxupdate,dispmanxelement,dispmanxresource_amigafb_2);
+
+		vc_dispmanx_update_submit(dispmanxupdate,vsync_callback,NULL);
+	}
+
+       /*vc_dispmanx_resource_write_data(  dispmanxresource_amigafb_1,
+                                            VC_IMAGE_RGB565,
+                                            current_width * 2,
+                                            gfx_mem,
+                                            &blit_rect );*/
+
+
+
+
+#ifndef RASPBERRY
 	if (show_message)
 	{
 		show_message--;
@@ -173,32 +166,39 @@ void flush_screen (void)
 			_write_text_inv_n(prSDLScreen,0,29,30,show_message_str);
 		}
 	}
+#endif
 	if (emulated_mouse)
 		vkbd_mouse();
 	if (vkbd_mode)
 		vkbd_key=vkbd_process();
-#if defined(DOUBLEBUFFER) || defined(DINGOO)
-	SDL_Flip(prSDLScreen);
-#endif
-#ifdef USE_RASTER_DRAW
-    }
-#endif
-#if !defined(DREAMCAST) && !defined(DINGOO)
-    if (SDL_MUSTLOCK(prSDLScreen))
-    	SDL_LockSurface (prSDLScreen);
-#endif
     uae4all_prof_end(13);
 }
 
+
 void black_screen_now(void)
 {
-	SDL_FillRect(prSDLScreen,NULL,0);
-#if defined(DOUBLEBUFFER) || defined(DINGOO)
-	SDL_Flip(prSDLScreen);
-#else
-	SDL_UpdateRect(prSDLScreen, 0, 0, 320, 240);
-#endif
+	// Avoid to draw next frame
+	extern int framecnt   ,framecnt_hack ;
+	framecnt = 1;
+	framecnt_hack = 0;
 
+	// Clear screen
+	memset (gfx_mem, 0 , current_width * current_height * 2 );
+	vc_dispmanx_resource_write_data(  dispmanxresource_amigafb_1,
+	                                    VC_IMAGE_RGB565,
+	                                    current_width * 2,
+	                                    gfx_mem,
+	                                    &blit_rect );
+	vc_dispmanx_resource_write_data(  dispmanxresource_amigafb_2,
+	                                    VC_IMAGE_RGB565,
+	                                    current_width * 2,
+	                                    gfx_mem,
+	                                    &blit_rect );
+	dispmanxupdate = vc_dispmanx_update_start( 10 );
+	vc_dispmanx_element_change_source(dispmanxupdate,dispmanxelement,dispmanxresource_amigafb_1);
+	vc_dispmanx_update_submit(dispmanxupdate,NULL,NULL);
+	//vc_dispmanx_update_submit_sync(dispmanxupdate);
+	need_frameskip =  1;
 }
 
 static __inline__ int bitsInMask (unsigned long mask)
@@ -225,20 +225,6 @@ static __inline__ int maskShift (unsigned long mask)
 	return n;
 }
 
-static int get_color (int r, int g, int b, xcolnr *cnp)
-{
-#ifdef DEBUG_GFX
-	dbg("Function: get_color");
-#endif
-
-	*cnp = SDL_MapRGB(prSDLScreen->format, r, g, b);
-	arSDLColors[ncolors].r = r;
-	arSDLColors[ncolors].g = g;
-	arSDLColors[ncolors].b = b;
-
-	ncolors++;
-	return 1;
-}
 
 static int init_colors (void)
 {
@@ -249,12 +235,18 @@ static int init_colors (void)
 #endif
 
 		/* Truecolor: */
-		red_bits = bitsInMask(prSDLScreen->format->Rmask);
-		green_bits = bitsInMask(prSDLScreen->format->Gmask);
-		blue_bits = bitsInMask(prSDLScreen->format->Bmask);
-		red_shift = maskShift(prSDLScreen->format->Rmask);
-		green_shift = maskShift(prSDLScreen->format->Gmask);
-		blue_shift = maskShift(prSDLScreen->format->Bmask);
+		//red_bits = bitsInMask(prSDLScreen->format->Rmask);
+		//green_bits = bitsInMask(prSDLScreen->format->Gmask);
+		//blue_bits = bitsInMask(prSDLScreen->format->Bmask);
+		//red_shift = maskShift(prSDLScreen->format->Rmask);
+		//green_shift = maskShift(prSDLScreen->format->Gmask);
+		//blue_shift = maskShift(prSDLScreen->format->Bmask);
+		red_bits = 5;
+		green_bits = 6;
+		blue_bits = 5;
+		red_shift = 5 + 6;
+		green_shift = 5;
+		blue_shift = 0;
 		alloc_colors64k (red_bits, green_bits, blue_bits, red_shift, green_shift, blue_shift);
 		for (i = 0; i < 4096; i++)
 			xcolors[i] = xcolors[i] * 0x00010001;
@@ -267,75 +259,103 @@ int graphics_setup (void)
 #ifdef DEBUG_GFX
     dbg("Function: graphics_setup");
 #endif
-
-    /* Initialize the SDL library */
-    if ( SDL_Init(SDL_INIT_VIDEO) < 0 )
-    {
-        fprintf(stderr, "Unable to init SDL: %s\n", SDL_GetError());
-        return 0;
-    }
-
+    bcm_host_init();
+    // FDA should above gfxmem used ?
+    gfx_mem = (char *) calloc( 1, PREFS_GFX_WIDTH * PREFS_GFX_HEIGHT* 2 );
     return 1;
 }
 
 
-static void graphics_subinit (void)
+void graphics_subinit (void)
 {
-	Uint32 uiSDLVidModFlags;
+	VC_DISPMANX_ALPHA_T alpha = { (DISPMANX_FLAGS_ALPHA_T ) (DISPMANX_FLAGS_ALPHA_FROM_SOURCE | DISPMANX_FLAGS_ALPHA_FIXED_ALL_PIXELS), 
+                             255, /*alpha 0->255*/
+                             0 };
 
-#ifdef DEBUG_GFX
+	uint32_t                    vc_image_ptr;
+//#ifdef DEBUG_GFX
+#if 1
 	dbg("Function: graphics_subinit");
+	dbgf("Emulation Resolution: %d x %d\n", current_width, current_height);
 #endif
 
-	/* Open SDL Window in current mode */
-	uiSDLVidModFlags = SDL_HWSURFACE; //SDL_SWSURFACE;
-#ifdef DEBUG_GFX
-	dbgf("Resolution: %d x %d\n", current_width, current_height);
-#endif
+	//prSDLScreen = SDL_SetVideoMode(current_width, current_height, 16, uiSDLVidModFlags|VIDEO_FLAGS);
 
-	if (prSDLScreen==NULL)
-#ifdef DREAMCAST
-		prSDLScreen = SDL_SetVideoMode(current_width, current_height, 16, uiSDLVidModFlags|VIDEO_FLAGS);
-#else
-		prSDLScreen = SDL_SetVideoMode(current_width, current_height, 16, uiSDLVidModFlags|VIDEO_FLAGS);
-#endif
-	if (prSDLScreen == NULL)
+	if (dispmanxresource_amigafb_1 == 0)
 	{
-		fprintf(stderr, "Unable to set video mode: %s\n", SDL_GetError());
-		return;
+		dispmanxdisplay = vc_dispmanx_display_open( 0 );
+		vc_dispmanx_display_get_info( dispmanxdisplay, &dispmanxdinfo);
+
+		dispmanxresource_amigafb_1 = vc_dispmanx_resource_create( VC_IMAGE_RGB565,  current_width,   current_height,  &vc_image_ptr);
+		dispmanxresource_amigafb_2 = vc_dispmanx_resource_create( VC_IMAGE_RGB565,  current_width,   current_height,  &vc_image_ptr);
+
+		// FDA should above gfxmem used ?
+		//gfx_mem = (char *) calloc( 1, current_width * current_height * 2 );
+
+
+		vc_dispmanx_rect_set( &blit_rect, 0, 0, current_width,current_height);
+
+		vc_dispmanx_resource_write_data(  dispmanxresource_amigafb_1,
+	                                    VC_IMAGE_RGB565,
+	                                    current_width *2,
+	                                    gfx_mem,
+	                                    &blit_rect );
+
+		vc_dispmanx_rect_set( &src_rect, 0, 0, current_width << 16, current_height << 16 );
+
+
+
+		//vc_dispmanx_rect_set( &dst_rect, (dispmanxdinfo.width /2),
+	        //                     (dispmanxdinfo.height * 3)/100 ,
+	        //                     (dispmanxdinfo.width - (dispmanxdinfo.width * 6)/100 )/2,
+	        //                     (dispmanxdinfo.height - (dispmanxdinfo.height * 7)/100 )/2);
+
+	}
+
+
+	if (mainMenu_screenformat == 0)
+	{
+		printf("Fullscreen\n");
+		vc_dispmanx_rect_set( &dst_rect, (dispmanxdinfo.width * 3)/100,
+								(dispmanxdinfo.height * 3)/100 ,
+								dispmanxdinfo.width - (dispmanxdinfo.width * 6)/100 ,
+								dispmanxdinfo.height - (dispmanxdinfo.height * 7)/100 );
 	}
 	else
 	{
-		prSDLScreenPixels=(uae_u16 *)prSDLScreen->pixels;
-#ifdef DEBUG_GFX 
-		dbgf("Pixel Color -> R: %d,  G: %d,  B: %d,  \n", prSDLScreen->format->Rmask, prSDLScreen->format->Gmask, prSDLScreen->format->Bmask);
-		dbgf("Bytes per Pixel: %d\n", prSDLScreen->format->BytesPerPixel);
-		dbgf("Bytes per Line: %d\n", prSDLScreen->pitch);
-#endif
-#if !defined(DREAMCAST) && !defined(DINGOO)
-		if (SDL_MUSTLOCK(prSDLScreen))
-			SDL_LockSurface(prSDLScreen);
-#endif
-		memset(prSDLScreen->pixels, 0, current_width * current_height * prSDLScreen->format->BytesPerPixel);
-#if !defined(DREAMCAST) && !defined(DINGOO)
-		if (SDL_MUSTLOCK(prSDLScreen))
-			SDL_UnlockSurface(prSDLScreen);
-#endif
-#if !defined(DOUBLEBUFFER) && !defined(DINGOO)
-		SDL_UpdateRect(prSDLScreen, 0, 0, current_width, current_height);
-#else
-		SDL_Flip(prSDLScreen);
-#endif
-#ifndef DREAMCAST
-		/* Set UAE window title and icon name */
-		SDL_WM_SetCaption("UAE4ALL","UAE4ALL");
-		/* Hide mouse cursor */
-		SDL_ShowCursor(SDL_DISABLE);
-#endif
-		/* Initialize structure for Amiga video modes */
-		gfx_mem = (char *)prSDLScreen->pixels;
-		gfx_rowbytes = prSDLScreen->pitch;
+		vc_dispmanx_rect_set( &dst_rect, ((dispmanxdinfo.width * 17)/100) ,
+								(dispmanxdinfo.height * 3)/100 ,
+								(dispmanxdinfo.width - ((dispmanxdinfo.width * 36)/100)) ,
+								dispmanxdinfo.height - (dispmanxdinfo.height * 7)/100 );
 	}
+
+
+
+	dispmanxupdate = vc_dispmanx_update_start( 10 );
+	dispmanxelement = vc_dispmanx_element_add( dispmanxupdate,
+	                                        dispmanxdisplay,
+	                                        2000,               // layer
+	                                        &dst_rect,
+	                                        dispmanxresource_amigafb_1,
+	                                        &src_rect,
+	                                        DISPMANX_PROTECTION_NONE,
+	                                        &alpha,
+	                                        NULL,             // clamp
+	                                        DISPMANX_NO_ROTATE );
+
+	vc_dispmanx_update_submit_sync(dispmanxupdate);
+	//dispmanxupdate = vc_dispmanx_update_start( 10 );
+	  
+//#ifdef DEBUG_GFX
+#if 1
+	dbgf("Res dispmanX: %d %d\n", dispmanxdinfo.width ,dispmanxdinfo.height );
+#endif
+
+	/* Initialize structure for Amiga video modes */
+	//gfx_mem = (char *)prSDLScreen->pixels;
+	//gfx_rowbytes = prSDLScreen->pitch;
+	gfx_rowbytes = current_width *2;
+
 #ifdef DEBUG_GFX
 	dbgf("current_height=%i\n",current_height);
 #endif
@@ -355,29 +375,43 @@ int graphics_init (void)
 	current_width = PREFS_GFX_WIDTH;
 	current_height = PREFS_GFX_HEIGHT;
 
+	uae_sem_init (&vsync_wait_sem, 0, 1);
+
 	graphics_subinit ();
 
 
-    if (!init_colors ())
+	if (!init_colors ())
 		return 0;
 
-    buttonstate[0] = buttonstate[1] = buttonstate[2] = 0;
-    for (i = 0; i < 256; i++)
-	uae4all_keystate[i] = 0;
+	buttonstate[0] = buttonstate[1] = buttonstate[2] = 0;
+	for (i = 0; i < 256; i++)
+		uae4all_keystate[i] = 0;
 
-#ifdef DEBUG_FRAMERATE
-    uae4all_update_time();
-#endif
-    return 1;
+	return 1;
 }
+
+
+void graphics_dispmanshutdown (void)
+{
+    dispmanxupdate = vc_dispmanx_update_start( 10 );
+    vc_dispmanx_element_remove( dispmanxupdate, dispmanxelement);
+    vc_dispmanx_update_submit_sync(dispmanxupdate);
+}
+
 
 static void graphics_subshutdown (void)
 {
 #ifdef DEBUG_GFX
     dbg("Function: graphics_subshutdown");
 #endif
-
+    graphics_dispmanshutdown();
+    vc_dispmanx_resource_delete( dispmanxresource_amigafb_1 );
+	vc_dispmanx_resource_delete( dispmanxresource_amigafb_2 );
+    vc_dispmanx_display_close( dispmanxdisplay );
     SDL_FreeSurface(prSDLScreen);
+    #if DEBUG_GFX
+    dbgf("Killed %d %d %d %d\n", dispmanxupdate , dispmanxelement, dispmanxresource_amigafb_1 , dispmanxdisplay);
+    #endif
 }
 
 void graphics_leave (void)
@@ -538,139 +572,6 @@ void handle_events (void)
     dbg("Function: handle_events");
 #endif
 
-
-#if defined(MAX_AUTOEVENTS) || defined(AUTOEVENTS)
-	{
-		static unsigned cuenta=0;
-/*
-		switch(cuenta&63)
-		{
-			case 8:
-				if ((cuenta<6500)||(cuenta>8000))
-					joy1button=1;
-				break;
-			case 16:
-				buttonstate[0]=1; break;
-			case 24:
-				joy1button=0; break;
-			case 28:
-				if (cuenta>11000)
-					joy1dir=3;
-				break;
-			case 32:
-				buttonstate[0]=0; break;
-			case 62:
-				joy1dir=0; break;
-		}
-//		lastmy+=8;
-		switch(cuenta&127)
-		{
-			case 20:
-				record_key(0x12); break;
-			case 40:
-				record_key(0x13); break;
-			case 60:
-				record_key(0x88); break;
-			case 80:
-				record_key(0x89); break;
-		}
-*/
-/*
-if (cuenta==7700)
-{
-strcpy(changed_df[0],"prueba2.adz");
-real_changed_df[0]=1;
-joy1button=1;
-}
-*/
-
-// Defender of the Crown
- /*
-switch(cuenta)
-{
-case 2600:
-lastmx+=80;
-break;
-case 2610:
-buttonstate[0]=1; break;
-break;
-case 2615:
-buttonstate[0]=0; break;
-break;
-case 4500:
-lastmy+=100;
-break;
-case 4510:
-buttonstate[0]=1; break;
-break;
-case 4515:
-buttonstate[0]=0; break;
-break;
-case 4640:
-lastmy-=60;
-lastmx+=550;
-break;
-case 4700:
-lastmx+=200;
-break;
-case 4710:
-buttonstate[0]=1; break;
-break;
-case 4715:
-buttonstate[0]=0; break;
-break;
-
-
-}
-// printf("%i -> %.8X\n",cuenta,chipmem_checksum());
- */
-
-
-#if defined(START_DEBUG) && !defined(START_DEBUG_SAVESTATE)
-		if (cuenta==START_DEBUG)
-		{
-#ifdef DEBUG_FILE
-			if (!DEBUG_STR_FILE)
-				DEBUG_STR_FILE=fopen(DEBUG_FILE,"wt");
-#endif
-			DEBUG_AHORA=1;
-		}
-#else
-#ifdef START_DEBUG_SAVESTATE
-		if (cuenta==START_DEBUG)
-			savestate_state = STATE_DOSAVE;
-#endif
-#endif
-#ifdef AUTO_SAVESTATE
-		if (cuenta==AUTO_SAVESTATE)
-			savestate_state = STATE_DORESTORE;
-#endif
-
-#ifdef MAX_AUTOEVENTS
-#ifdef DEBUG_EVENTS
-		dbgf(" AUTO EVENTS: %i =?= %i\n",cuenta,MAX_AUTOEVENTS);
-#endif
-		if (cuenta>MAX_AUTOEVENTS)
-		{
-			int i;
-#ifdef DEBUG_FILE
-			fclose(DEBUG_STR_FILE);
-			SDL_Delay(100);
-			for(i=0;i<0x10000;i+=78)
-			{
-				SDL_FillRect(prSDLScreen, NULL, i);
-				SDL_Flip(prSDLScreen);
-			}
-			SDL_Delay(333);
-#endif
-			exit(0);
-		}
-		else
-			dbgf("handle_events %i\n",cuenta);
-#endif
-		cuenta++;
-	}
-#else
     /* Handle GUI events */
     gui_handle_events ();
 
@@ -708,7 +609,6 @@ break;
 #ifdef DEBUG_EVENTS
 	    dbg("Event: key down");
 #endif
-#ifndef DREAMCAST
 	    if ((rEvent.key.keysym.sym!=SDLK_F11)&&(rEvent.key.keysym.sym!=SDLK_F12)&&(rEvent.key.keysym.sym!=SDLK_PAGEUP)
 #ifdef EMULATED_JOYSTICK
 		&&(rEvent.key.keysym.sym!=SDLK_ESCAPE)&&((rEvent.key.keysym.sym!=SDLK_SPACE)||((rEvent.key.keysym.sym==SDLK_SPACE)&&(vkbd_button3!=(SDLKey)0)&&(!vkbd_mode)))&&(rEvent.key.keysym.sym!=SDLK_LCTRL)&&((rEvent.key.keysym.sym!=SDLK_LALT)||((rEvent.key.keysym.sym==SDLK_LALT)&&(vkbd_button2!=(SDLKey)0)&&(!vkbd_mode)))&&(rEvent.key.keysym.sym!=SDLK_RETURN)&&((rEvent.key.keysym.sym!=SDLK_LSHIFT)||((rEvent.key.keysym.sym==SDLK_LSHIFT)&&(vkbd_button4!=(SDLKey)0)&&(!vkbd_mode)))&&(rEvent.key.keysym.sym!=SDLK_TAB)&&(rEvent.key.keysym.sym!=SDLK_BACKSPACE)&&(rEvent.key.keysym.sym!=SDLK_UP)&&(rEvent.key.keysym.sym!=SDLK_DOWN)&&(rEvent.key.keysym.sym!=SDLK_LEFT)&&(rEvent.key.keysym.sym!=SDLK_RIGHT)
@@ -723,9 +623,7 @@ break;
 		    else
 		    if ((rEvent.key.keysym.sym==SDLK_SPACE)&&(vkbd_button3!=(SDLKey)0)&&(!vkbd_mode))
 			    rEvent.key.keysym.sym=vkbd_button3;
-#else
-	    {
-#endif
+
 		iAmigaKeyCode = keycode2amiga(&(rEvent.key.keysym));
 		if (iAmigaKeyCode >= 0)
 		{
@@ -751,7 +649,6 @@ break;
 #ifdef DEBUG_EVENTS
 	    dbg("Event: key up");
 #endif
-#ifndef DREAMCAST
 	    if ((rEvent.key.keysym.sym!=SDLK_F11)&&(rEvent.key.keysym.sym!=SDLK_F12)&&(rEvent.key.keysym.sym!=SDLK_PAGEUP)
 #ifdef EMULATED_JOYSTICK
 		&&(rEvent.key.keysym.sym!=SDLK_ESCAPE)&&((rEvent.key.keysym.sym!=SDLK_SPACE)||((rEvent.key.keysym.sym==SDLK_SPACE)&&(vkbd_button3!=(SDLKey)0)&&(!vkbd_mode)))&&(rEvent.key.keysym.sym!=SDLK_LCTRL)&&((rEvent.key.keysym.sym!=SDLK_LALT)||((rEvent.key.keysym.sym==SDLK_LALT)&&(vkbd_button2!=(SDLKey)0)&&(!vkbd_mode)))&&(rEvent.key.keysym.sym!=SDLK_RETURN)&&((rEvent.key.keysym.sym!=SDLK_LSHIFT)||((rEvent.key.keysym.sym==SDLK_LSHIFT)&&(vkbd_button4!=(SDLKey)0)&&(!vkbd_mode)))&&(rEvent.key.keysym.sym!=SDLK_TAB)&&(rEvent.key.keysym.sym!=SDLK_BACKSPACE)&&(rEvent.key.keysym.sym!=SDLK_UP)&&(rEvent.key.keysym.sym!=SDLK_DOWN)&&(rEvent.key.keysym.sym!=SDLK_LEFT)&&(rEvent.key.keysym.sym!=SDLK_RIGHT)
@@ -766,9 +663,7 @@ break;
 		    else
 		    if ((rEvent.key.keysym.sym==SDLK_SPACE)&&(vkbd_button3!=(SDLKey)0)&&(!vkbd_mode))
 			    rEvent.key.keysym.sym=vkbd_button3;
-#else
-	    {
-#endif
+
 		iAmigaKeyCode = keycode2amiga(&(rEvent.key.keysym));
 		if (iAmigaKeyCode >= 0)
 		{
@@ -781,62 +676,14 @@ break;
 #ifdef DEBUG_EVENTS
 	    dbg("Event: mouse button down");
 #endif
-#ifdef DREAMCAST
-	    if (__sdl_dc_emulate_mouse)
-	    {
-	    	if (vkbd_mode) break;
-	    	if (rEvent.button.button==5 ) {
-			if (vkbd_button3==(SDLKey)0)
-			    buttonstate[0] = 1;
-			else 
-				break;
-		}
-	    	else if (rEvent.button.button==1)  {
-			if (vkbd_button4==(SDLKey)0)
-		 	   buttonstate[2] = 1;
-			else
-				break;
-		}
-	    }
-	    else
-	    	if (rEvent.button.button)
-			buttonstate[2]=1;
-		else
-			buttonstate[0]=1;
-#else
 	    	buttonstate[(rEvent.button.button-1)%3] = 1;
-#endif
 	    break;
 	case SDL_MOUSEBUTTONUP:
 #ifdef DEBUG_EVENTS
 	    dbg("Event: mouse button up");
 #endif
-#ifdef DREAMCAST
-	    if (__sdl_dc_emulate_mouse)
-	    {
-	    	if (vkbd_mode) break;
-	    	if (rEvent.button.button==5) {
-			if (vkbd_button3==(SDLKey)0)
-			    buttonstate[0] = 0;
-			else
-				break;
-		}
-	    	else if (rEvent.button.button==1) {
-			if (vkbd_button4==(SDLKey)0)
-			    buttonstate[2] = 0;
-			else
-				break;
-		}
-	    }
-	    else
-	    	if (rEvent.button.button)
-			buttonstate[2]=0;
-		else
-			buttonstate[0]=0;
-				
-#else
+
 	    	buttonstate[(rEvent.button.button-1)%3] = 0;
-#endif
 	    break;
 	case SDL_MOUSEMOTION:
 #ifdef DEBUG_EVENTS
@@ -848,7 +695,6 @@ break;
 	    break;
 	}
     }
-#endif
 
 
     /* Handle UAE reset */
@@ -888,8 +734,6 @@ int lockscr (void)
 #ifdef DEBUG_GFX
     dbg("Function: lockscr");
 #endif
-    if (SDL_MUSTLOCK(prSDLScreen))
-	SDL_LockSurface(prSDLScreen);
     return 1;
 }
 
@@ -898,8 +742,6 @@ void unlockscr (void)
 #ifdef DEBUG_GFX
     dbg("Function: unlockscr");
 #endif
-    if (SDL_MUSTLOCK(prSDLScreen))
-    	SDL_UnlockSurface(prSDLScreen);
 }
 #endif
 

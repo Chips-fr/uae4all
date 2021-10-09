@@ -11,18 +11,22 @@ PROG   = $(NAME)
 
 all: $(PROG)
 
+#CYCLONE_CORE=1
 FAME_CORE=1
-#FAME_CORE_C=1
+FAME_CORE_C=1
 LIB7Z=1
 
 DEFAULT_CFLAGS = `sdl-config --cflags`
-LDFLAGS        = `sdl-config --libs` -lz
+LDFLAGS        = `sdl-config --libs` -lz -lbcm_host -L/opt/vc/lib -flto -lpthread
 
 
-MORE_CFLAGS = -O3  -Isrc/ -Isrc/include/ -Isrc/menu -Isrc/vkbd -fomit-frame-pointer  -Wno-unused -Wno-format -DUSE_SDL -DGCCCONSTFUNC="__attribute__((const))" -DUSE_UNDERSCORE -fno-exceptions -DUNALIGNED_PROFITABLE -DREGPARAM="__attribute__((regparm(3)))" -DOPTIMIZED_FLAGS -D__inline__=__inline__ -DSHM_SUPPORT_LINKS=0 -DOS_WITHOUT_MEMORY_MANAGEMENT -DVKBD_ALWAYS
+MORE_CFLAGS = -flto -g -O3  -I/opt/vc/include/interface/vmcs_host/linux/ -Isrc/ -I/opt/vc/include/ -I/opt/vc/include/interface/vcos/pthreads/  -Isrc/include/ -Isrc/menu -Isrc/vkbd -fomit-frame-pointer  -Wno-unused -Wno-format -DUSE_SDL -DGCCCONSTFUNC="__attribute__((const))" -DUSE_UNDERSCORE -fno-exceptions -DUNALIGNED_PROFITABLE -DREGPARAM="__attribute__((regparm(3)))" -DOPTIMIZED_FLAGS -D__inline__=__inline__ -DSHM_SUPPORT_LINKS=0 -DOS_WITHOUT_MEMORY_MANAGEMENT -DVKBD_ALWAYS
 
 
 MORE_CFLAGS+= -DROM_PATH_PREFIX=\"./\" -DDATA_PREFIX=\"./data/\" -DSAVE_PREFIX=\"./\"
+
+MORE_CFLAGS+= -DRASPBERRY
+MORE_CFLAGS+= -DNO_VKBD
 
 #MORE_CFLAGS+= -DUSE_MAYBE_BLIT
 #MORE_CFLAGS+= -DUSE_BLITTER_DELAYED
@@ -45,7 +49,7 @@ MORE_CFLAGS+= -DUSE_ZFILE
 #MORE_CFLAGS+= -DUAE4ALL_NO_USE_RESTRICT
 
 #MORE_CFLAGS+= -DNO_SOUND
-MORE_CFLAGS+= -DNO_THREADS
+#MORE_CFLAGS+= -DNO_THREADS
 #MORE_CFLAGS+= -DEXACT_AUDIO
 #MORE_CFLAGS+= -DSOUND_AHI
 #MORE_CFLAGS+= -DCUT_COPPER
@@ -63,13 +67,13 @@ MORE_CFLAGS+= -DFAME_INTERRUPTS_PATCH
 #MORE_CFLAGS+= -DSAFE_MEMORY_ACCESS
 #MORE_CFLAGS+= -DERROR_WHEN_MEMORY_OVERRUN
 
-#MORE_CFLAGS+= -DDEBUG_UAE4ALL
+MORE_CFLAGS+= -DDEBUG_UAE4ALL
 #MORE_CFLAGS+= -DDEBUG_UAE4ALL_FFLUSH
 #MORE_CFLAGS+= -DDEBUG_M68K
 #MORE_CFLAGS+= -DDEBUG_INTERRUPTS
 #MORE_CFLAGS+= -DDEBUG_CYCLES
 #MORE_CFLAGS+= -DDEBUG_CIA
-#MORE_CFLAGS+= -DDEBUG_SOUND
+MORE_CFLAGS+= -DDEBUG_SOUND
 #MORE_CFLAGS+= -DDEBUG_MEMORY
 #MORE_CFLAGS+= -DDEBUG_MAPPINGS
 #MORE_CFLAGS+= -DDEBUG_DISK
@@ -116,8 +120,8 @@ OBJS =	\
 	src/missing.o \
 	src/gui.o \
 	src/od-joy.o \
-	src/sound.o \
-	src/sdlgfx.o \
+	src/sound_sdl_new.o \
+	src/raspbgfx.o \
 	src/writelog.o \
 	src/zfile.o \
 	src/menu/fade.o \
@@ -166,6 +170,17 @@ src/m68k/fame/fame.o: src/m68k/fame/fame.asm
 OBJS += src/m68k/fame/fame.o
 endif
 OBJS += src/m68k/fame/m68k_intrf.o
+else # FAME_CORE
+ifdef CYCLONE_CORE
+# use all FAME hacks in uae code for Cyclone too
+CFLAGS+=-DUSE_FAME_CORE
+CFLAGS+=-DUSE_CYCLONE_CORE
+#ASFLAGS+=-mfloat-abi=soft -mcpu=arm920t
+OBJS += src/m68k/cyclone/cyclone.o
+OBJS += src/m68k/m68k_cmn_intrf.o
+OBJS += src/m68k/cyclone/m68k_intrf.o
+CFLAGS+=-DUSE_CYCLONE_MEMHANDLERS
+OBJS += src/m68k/cyclone/memhandlers.o
 else
 OBJS += \
 	src/m68k/uae/newcpu.o \
@@ -174,14 +189,14 @@ OBJS += \
 	src/m68k/uae/fpp.o \
 	src/m68k/uae/cpustbl.o \
 	src/m68k/uae/cpuemu.o
-
+endif
 endif
 
 CPPFLAGS  = $(CFLAGS)
 
 $(PROG): $(OBJS) 
 	$(CC) $(CFLAGS) -o $(PROG) $(OBJS) $(LDFLAGS)
-	$(STRIP) $(PROG)
+#	$(STRIP) $(PROG)
 
 
 run: $(PROG)
