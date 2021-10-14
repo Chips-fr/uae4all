@@ -235,10 +235,25 @@ static void uae4all_reset(void)
 #endif
 }
 
+#ifdef __LIBRETRO__
+extern int libretro_frame_end;
+#endif
+
 static void m68k_run (void)
 {
+#ifdef __LIBRETRO__
+	static int onlyfirstreset = 0;
+	libretro_frame_end = 0;
+	if (0 == onlyfirstreset)
+	{
+		onlyfirstreset = 1;
+		uae4all_reset ();
+	}
+#else
 	uae4all_reset ();
-	unsigned cycles, cycles_actual=M68KCONTEXT.cycles_counter;
+#endif
+	static unsigned cycles, cycles_actual=M68KCONTEXT.cycles_counter;
+
 	for (;;) {
 #ifdef DEBUG_M68K
 		dbg_cycle(m68k_fetch(m68k_get_pc(),0));
@@ -315,6 +330,11 @@ static void m68k_run (void)
 		cycles_actual=M68KCONTEXT.cycles_counter;
 #endif
                 uae4all_prof_end(1);
+#ifdef __LIBRETRO__
+		if (libretro_frame_end)
+			return;
+#endif
+
 	}
 }
 
@@ -332,7 +352,9 @@ void m68k_go (int may_quit)
 
     in_m68k_go++;
 #endif
+#ifndef __LIBRETRO__
     quit_program = 2;
+#endif
     for (;;) {
         if (quit_program > 0) {
             if (quit_program == 1)
@@ -349,12 +371,16 @@ void m68k_go (int may_quit)
         }
 
         m68k_run();
+#ifdef __LIBRETRO__
+        if (libretro_frame_end)
+            break;
+#endif
     }
 #if !defined(DREAMCAST) || defined(DEBUG_UAE4ALL)
     in_m68k_go--;
 #endif
 #ifdef DEBUG_UAE4ALL
-    puts("BYE?");
+    //puts("BYE?");
 #endif
 }
 

@@ -253,7 +253,7 @@ typedef struct _cmdline_opt
 
 extern int  mainMenu_throttle, mainMenu_frameskip, mainMenu_sound, mainMenu_case, mainMenu_autosave, mainMenu_vpos;
 extern unsigned int sound_rate;
-extern char romfile[64];
+
 extern char uae4all_image_file[128];
 extern char uae4all_image_file2[128];
 
@@ -312,6 +312,8 @@ void parse_cmdline(int argc, char **argv)
 	}
 }
 
+extern void update_prefs_retrocfg(void);
+
 void real_main (int argc, char **argv)
 {
 #ifdef USE_SDL
@@ -324,8 +326,11 @@ void real_main (int argc, char **argv)
 #endif
 
     default_prefs ();
-    parse_cmdline(argc, argv);
 
+    parse_cmdline(argc, argv);
+#ifdef __LIBRETRO__
+    update_prefs_retrocfg();
+#endif
     if (! graphics_setup ()) {
 	exit (1);
     }
@@ -338,16 +343,12 @@ void real_main (int argc, char **argv)
 	produce_sound = 0;
     }
     init_joystick ();
-    //#ifndef RASPBERRY
-    #if 1
-	int err = gui_init ();
-	if (err == -1) {
-	    write_log ("Failed to initialize the GUI\n");
-            printf("Failed to initialize the GUI\n");
-	} else if (err == -2) {
-	    exit (0);
-	}
-    #endif
+    int err = gui_init ();
+    if (err == -1) {
+        write_log ("Failed to initialize the GUI\n");
+    } else if (err == -2) {
+        exit (0);
+    }
     if (sound_available && produce_sound > 1 && ! init_audio ()) {
 	write_log ("Sound driver unavailable: Sound output disabled\n");
 	produce_sound = 0;
@@ -370,9 +371,11 @@ void real_main (int argc, char **argv)
     gui_update ();
 
 //    dingoo_set_clock(430);
+#ifndef __LIBRETRO__
     if (graphics_init ())
 		start_program ();
     leave_program ();
+#endif
 }
 
 #ifndef NO_MAIN_IN_MAIN_C

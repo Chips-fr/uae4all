@@ -268,9 +268,11 @@ static void restore_header (uae_u8 *src)
 }
 
 static void clear_events(void) {
+#ifndef __LIBRETRO__
 	SDL_Event event;
 	while (SDL_PollEvent(&event))
 		SDL_Delay(20);
+#endif
 }
 /* restore all subsystems */
 

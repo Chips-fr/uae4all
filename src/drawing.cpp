@@ -2137,10 +2137,12 @@ void vsync_handle_redraw (int long_frame, int lof_changed)
 {
     last_redraw_point++;
 
+#ifdef RASPBERRY
     // To improve
     if (wait_for_vsync == 1) {
 	    uae_sem_wait (&vsync_wait_sem);
     }
+#endif
 
     count_frame ();
     wait_for_vsync = 0;

@@ -67,9 +67,13 @@ SDL_Surface *prSDLScreen;
 
 extern struct uae_prefs changed_prefs;
 extern struct uae_prefs currprefs;
+#ifdef DREAMCAST
 extern SDL_Joystick *uae4all_joy0, *uae4all_joy1;
+#endif
 
+#ifndef NO_VKBD
 extern int keycode2amiga(SDL_keysym *prKeySym);
+#endif
 extern int uae4all_keystate[];
 
 int emulated_mouse_speed=4;
@@ -110,9 +114,15 @@ static void getChanges(void)
 int gui_init (void)
 {
 //Se ejecuta justo despues del MAIN
-//#ifndef RASPBERRY
-#if 1
-
+#if defined(__LIBRETRO__)
+extern int retrow, retroh;
+extern char *gfx_mem;
+    prSDLScreen = (SDL_Surface*)malloc( sizeof(*prSDLScreen) );
+    prSDLScreen->w = retrow;
+    prSDLScreen->h = retroh;
+    prSDLScreen->pitch = retrow*2;
+    prSDLScreen->pixels =(unsigned char*)gfx_mem;
+#else
     const SDL_VideoInfo* videoInfo = SDL_GetVideoInfo ();
     printf("Res: %d x %d %d bpp\n",videoInfo->current_w, videoInfo->current_h, videoInfo->vfmt->BitsPerPixel);
 
@@ -121,13 +131,10 @@ int gui_init (void)
         prSDLScreen=SDL_SetVideoMode(videoInfo->current_w,videoInfo->current_h,16,VIDEO_FLAGS);
 
     SDL_ShowCursor(SDL_DISABLE);
-#endif
     SDL_JoystickEventState(SDL_ENABLE);
     SDL_JoystickOpen(0);
-//#ifndef RASPBERRY
-#if 1
-    if (prSDLScreen!=NULL)
 #endif
+    if (prSDLScreen!=NULL)
     {
 	emulating=0;
 	vkbd_init();
@@ -310,10 +317,10 @@ static void goMenu(void)
    menu_raise();
    exitmode=run_mainMenu();
    notice_screen_contents_lost();
-   #ifndef RASPBERRY
+#ifndef RASPBERRY
    if ((!(strcmp(prefs_df[0],uae4all_image_file))) || ((!(strcmp(prefs_df[1],uae4all_image_file2)))))
 	   menu_unraise();
-   #endif
+#endif
 //   vkbd_init();
 #ifdef DREAMCAST
    SDL_DC_EmulateKeyboard(SDL_FALSE);
@@ -438,8 +445,8 @@ static void leftSuperThrottle(void)
 static void inc_throttle(int sgn)
 {
 	char n[40];
-	static Uint32 last=0;
-	Uint32 now=SDL_GetTicks();
+	static uint32_t last=0;
+	uint32_t now=SDL_GetTicks();
 	if (now-last<555)
 		return;
 	last=now;
@@ -464,6 +471,7 @@ static int in_goMenu=0;
 
 void gui_handle_events (void)
 {
+#ifndef __LIBRETRO__
 #ifndef DREAMCAST
 	Uint8 *keystate = SDL_GetKeyState(NULL);
 
@@ -755,6 +763,7 @@ void gui_handle_events (void)
 		else
 			goingVkbd=0;
 #endif
+#ifndef NO_VKBD
 	if (vkbd_key)
 	{
 		if (vkbd_keysave==-1234567)
@@ -782,6 +791,8 @@ void gui_handle_events (void)
 			}
 			vkbd_keysave=-1234567;
 		}
+#endif
+#endif // __LIBRETRO__
 }
 
 void gui_changesettings (void)
@@ -808,12 +819,10 @@ void gui_show_window_bar(int per, int max, int case_title)
 		title="  Restore State";
 	else
 		title="  Save State";
-//#ifndef RASPBERRY
-#if 1
+
 	_text_draw_window_bar(prSDLScreen,80,64,172,48,per,max,title);
 #if defined(DOUBLEBUFFER) || defined(DINGOO)
 	SDL_Flip(prSDLScreen);
-#endif
 #endif
 }
 

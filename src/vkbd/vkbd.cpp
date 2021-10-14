@@ -234,7 +234,7 @@ SDLKey vkbd_process(void)
 	static Uint32 last_time=0;
 	Uint32 now=SDL_GetTicks();
 	SDL_Rect r;
-	#ifndef RASPBERRY
+#ifndef RASPBERRY
 	int canmove=(now-last_time>MIN_VKBD_TIME);
 #ifndef VKBD_ALWAYS
 	if (vkbd_move) 
