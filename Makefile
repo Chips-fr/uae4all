@@ -20,7 +20,7 @@ DEFAULT_CFLAGS = `sdl-config --cflags`
 LDFLAGS        = `sdl-config --libs` -lz -lbcm_host -L/opt/vc/lib -flto -lpthread
 
 
-MORE_CFLAGS = -flto -g -O3  -I/opt/vc/include/interface/vmcs_host/linux/ -Isrc/ -I/opt/vc/include/ -I/opt/vc/include/interface/vcos/pthreads/  -Isrc/include/ -Isrc/menu -Isrc/vkbd -fomit-frame-pointer  -Wno-unused -Wno-format -DUSE_SDL -DGCCCONSTFUNC="__attribute__((const))" -DUSE_UNDERSCORE -fno-exceptions -DUNALIGNED_PROFITABLE -DREGPARAM="__attribute__((regparm(3)))" -DOPTIMIZED_FLAGS -D__inline__=__inline__ -DSHM_SUPPORT_LINKS=0 -DOS_WITHOUT_MEMORY_MANAGEMENT -DVKBD_ALWAYS
+MORE_CFLAGS = -flto -g -O3  -I/opt/vc/include/interface/vmcs_host/linux/ -Isrc/ -I/opt/vc/include/ -I/opt/vc/include/interface/vcos/pthreads/  -Isrc/include/ -Isrc/menu -Isrc/vkbd -fomit-frame-pointer -fno-threadsafe-statics -Wno-unused -Wno-format -DUSE_SDL -DGCCCONSTFUNC="__attribute__((const))" -DUSE_UNDERSCORE -fno-exceptions -DUNALIGNED_PROFITABLE -DREGPARAM="__attribute__((regparm(3)))" -DOPTIMIZED_FLAGS -D__inline__=__inline__ -DSHM_SUPPORT_LINKS=0 -DOS_WITHOUT_MEMORY_MANAGEMENT -DVKBD_ALWAYS
 
 
 MORE_CFLAGS+= -DROM_PATH_PREFIX=\"./\" -DDATA_PREFIX=\"./data/\" -DSAVE_PREFIX=\"./\"
