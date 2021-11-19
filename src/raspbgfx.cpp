@@ -180,7 +180,9 @@ void black_screen_now(void)
 	// Avoid to draw next frame
 	extern int framecnt   ,framecnt_hack ;
 	framecnt = 1;
+#ifndef USE_ALL_LINES
 	framecnt_hack = 0;
+#endif
 
 	// Clear screen
 	memset (gfx_mem, 0 , current_width * current_height * 2 );
