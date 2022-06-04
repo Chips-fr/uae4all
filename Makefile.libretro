@@ -9,15 +9,15 @@ TARGET = $(NAME)_libretro.so
 
 all: $(TARGET)
 
-#CYCLONE_CORE=1
-FAME_CORE=1
-FAME_CORE_C=1
+CYCLONE_CORE=1
+#FAME_CORE=1
+#FAME_CORE_C=1
 #LIB7Z=1
 
 LDFLAGS     = -lz -lpthread
 SHARED      = -shared -Wl,--version-script=libretro/link.T 
 
-MORE_CFLAGS = -g -O3 -Isrc/ -Isrc/include/ -Isrc/menu -Isrc/vkbd -fomit-frame-pointer -fno-threadsafe-statics -Wno-unused -Wno-format -DGCCCONSTFUNC="__attribute__((const))" -DUSE_UNDERSCORE -fno-exceptions -DUNALIGNED_PROFITABLE -DREGPARAM="__attribute__((regparm(3)))" -DOPTIMIZED_FLAGS -D__inline__=__inline__ -DSHM_SUPPORT_LINKS=0 -DOS_WITHOUT_MEMORY_MANAGEMENT -DVKBD_ALWAYS
+MORE_CFLAGS = -g -O2 -Isrc/ -Isrc/include/ -Isrc/menu -Isrc/vkbd -fomit-frame-pointer -fno-threadsafe-statics -Wno-unused -Wno-format -DGCCCONSTFUNC="__attribute__((const))" -DUSE_UNDERSCORE -fno-exceptions -DUNALIGNED_PROFITABLE -DREGPARAM="__attribute__((regparm(3)))" -DOPTIMIZED_FLAGS -D__inline__=__inline__ -DSHM_SUPPORT_LINKS=0 -DOS_WITHOUT_MEMORY_MANAGEMENT -DVKBD_ALWAYS
 
 MORE_CFLAGS+= -Ilibretro/include/ -Ilibretro/core/
 
@@ -66,7 +66,7 @@ MORE_CFLAGS+= -DFAME_INTERRUPTS_PATCH
 #MORE_CFLAGS+= -DSAFE_MEMORY_ACCESS
 #MORE_CFLAGS+= -DERROR_WHEN_MEMORY_OVERRUN
 
-MORE_CFLAGS+= -DDEBUG_UAE4ALL
+#MORE_CFLAGS+= -DDEBUG_UAE4ALL
 #MORE_CFLAGS+= -DDEBUG_UAE4ALL_FFLUSH
 #MORE_CFLAGS+= -DDEBUG_M68K
 #MORE_CFLAGS+= -DDEBUG_INTERRUPTS

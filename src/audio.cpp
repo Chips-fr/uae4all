@@ -74,6 +74,10 @@ static const int aprox_vol[128]= {-16, 0, 1, 1, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4,
 	sndbufpt = (uae_u16 *)(((uae_u8 *)sndbufpt) + 2); \
 	*(uae_u16 *)sndbufpt = b; \
 	sndbufpt = (uae_u16 *)(((uae_u8 *)sndbufpt) + 2); \
+	*(uae_u16 *)sndbufpt = b; \
+	sndbufpt = (uae_u16 *)(((uae_u8 *)sndbufpt) + 2); \
+	*(uae_u16 *)sndbufpt = b; \
+	sndbufpt = (uae_u16 *)(((uae_u8 *)sndbufpt) + 2); \
 }
 
 #define CHECK_SOUND_BUFFERS() \

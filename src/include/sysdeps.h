@@ -425,7 +425,9 @@ extern int console_get (char *, int);
 
    We define this value here rather than in events.h so that gencpu.c sees
    it.  */
-#define CYCLE_UNIT 512
+
+extern int cyclesunit;
+#define CYCLE_UNIT cyclesunit
 
 /* This one is used by cfgfile.c.  We could reduce the CYCLE_UNIT back to 1,
    I'm not 100% sure this code is bug free yet.  */

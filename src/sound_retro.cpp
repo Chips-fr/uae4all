@@ -26,7 +26,7 @@ extern unsigned long next_sample_evtime;
 int produce_sound=0;
 int changed_produce_sound=0;
 
-unsigned int sound_rate=DEFAULT_SOUND_FREQ;
+unsigned int sound_rate=22050;
 int mainMenu_soundStereo = 1;
 
 #define DEFAULT_SOUND_CHANNELS 2

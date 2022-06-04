@@ -32,6 +32,8 @@ extern char uae4all_image_file[];
 extern char uae4all_image_file2[];
 
 extern int mainMenu_throttle;
+extern int timeslice_mode;
+int cyclesunit = 512;
 
 extern void DISK_GUI_change (void);
 
@@ -153,7 +155,9 @@ void retro_set_environment(retro_environment_t cb)
 //      { "uae4all_resolution",     "Internal resolution; 320x240", },
 //      { "uae4all_leds_on_screen", "Leds on screen; on|off", },
 //      { "uae4all_floppy_speed",   "Floppy speed; 100|200|400|800", },
-      { "uae4all_throttle",   "Optimize level; none|1|2|3|4|5", },
+      { "uae4all_throttle",       "Optimize level; none|1|2|3|4|5", },
+      { "uae4all_cyclesunit" ,    "cycles; 512|256|128|64|32|16|8|4|2|1", },
+      { "uae4all_timeslice_mode", "value_t; 2|3||1|0", },
       { NULL, NULL },
    };
 
@@ -201,6 +205,22 @@ void update_prefs_retrocfg(void)
       else
          mainMenu_throttle = atoi(var.value);
       
+   }
+
+   var.key = "uae4all_timeslice_mode";
+   var.value = NULL;
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      timeslice_mode = atoi(var.value);
+   }
+
+   var.key = "uae4all_cyclesunit";
+   var.value = NULL;
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      cyclesunit = atoi(var.value);
    }
 
 #if 0
